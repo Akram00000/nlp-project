@@ -69,6 +69,22 @@
         </div>
     </div>
 
+    <!-- Source Modal -->
+    <div class="source-modal-overlay" id="sourceModalOverlay" onclick="closeSourceModal()">
+        <div class="source-modal" onclick="event.stopPropagation()">
+            <div class="source-modal-header">
+                <div class="source-modal-title">
+                    <span class="source-icon" id="sourceIcon">📜</span>
+                    <h3 id="sourceTitle">المصدر</h3>
+                    <span class="source-type-badge" id="sourceTypeBadge">فتوى</span>
+                </div>
+                <button class="close-btn" onclick="closeSourceModal()">×</button>
+            </div>
+            <div class="source-modal-meta" id="sourceMetadata"></div>
+            <div class="source-modal-content" id="sourceContent"></div>
+        </div>
+    </div>
+
     <script src="/static/script.js"></script>
 </body>
 </html>

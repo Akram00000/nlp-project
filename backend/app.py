@@ -44,11 +44,14 @@ class QueryRequest(BaseModel):
 
 class SourceInfo(BaseModel):
     """Information about a source document."""
+    chunk_id: str  # Unique identifier for source linking
     type: str
     title: Optional[str] = None
     author: Optional[str] = None
     scholar: Optional[str] = None
+    source_name: Optional[str] = None
     content_preview: str
+    full_content: str  # Full content for popup display
     score: float
 
 
@@ -203,61 +206,114 @@ async def query_rag(request: QueryRequest):
     logger.info(f"Retrieved {len(all_docs)} documents")
 
     
-    # Build sources list
+    # Build sources list with chunk_id for linking
     sources = []
-    for doc in all_docs:
+    sources_for_verification = []  # For citation verification
+    
+    for i, doc in enumerate(all_docs):
         doc_type = doc.metadata.get("type", "fatwa")
+        chunk_id = f"{doc_type}_{i}"  # Unique chunk ID for this response
+        
+        # Extract metadata
+        title = doc.metadata.get("title", doc.metadata.get("question", ""))[:100]
+        source_name = doc.metadata.get("source", doc.metadata.get("website", ""))
+        author = doc.metadata.get("author", doc.metadata.get("scholar", ""))
+        
         source_info = SourceInfo(
+            chunk_id=chunk_id,
             type=doc_type,
+            title=title if title else None,
+            source_name=source_name if source_name else None,
+            author=author if author and doc_type == "book" else None,
+            scholar=author if author and doc_type == "fatwa" else None,
             content_preview=doc.content[:300] + "..." if len(doc.content) > 300 else doc.content,
+            full_content=doc.content,  # Full content for popup
             score=doc.score,
         )
-        
-        if doc_type == "fatwa":
-            source_info.scholar = doc.metadata.get("scholar")
-        elif doc_type == "book":
-            source_info.title = doc.metadata.get("title")
-            source_info.author = doc.metadata.get("author")
-        elif doc_type == "hadith":
-            source_info.title = doc.metadata.get("source")
-        
         sources.append(source_info)
+        
+        # For verification
+        sources_for_verification.append({
+            "chunk_id": chunk_id,
+            "text": doc.content,
+            "source_type": doc_type,
+            "metadata": doc.metadata,
+        })
     
-    # Generate answer
+    # Generate answer using scholarly prompts
     answer = ""
     if rag_state.generator and all_docs:
-        context_manager = ContextManager(ContextConfig(max_context_tokens=4000))
-        formatted_context = context_manager.format_context(all_docs, include_metadata=True)
+        from rag_service.utils.scholarly_prompts import SCHOLARLY_SYSTEM_PROMPT
+        from rag_service.utils.fiqh_glossary import inject_glossary_definitions, build_glossary_footnotes
+        from rag_service.utils.citation_verifier import (
+            verify_answer_citations,
+            convert_source_links_to_html,
+            build_source_context_for_prompt,
+        )
         
-        system_prompt = """أنت عالم إسلامي متخصص. أجب على الأسئلة بناءً على المصادر المقدمة فقط.
-You are an Islamic scholar. Answer based only on the provided sources."""
-
+        # Build context with chunk_id for proper citations
+        sources_context = build_source_context_for_prompt(sources_for_verification)
+        
         user_prompt = f"""السؤال / Question:
 {query}
 
-المصادر / Sources:
-{formatted_context.text}
+المصادر المتاحة / Available Sources:
+{sources_context}
 
-الجواب / Answer:"""
+⚠️ IMPORTANT: Use ONLY the chunk_id values above for citations!
+Format: [source:chunk_id]description[/source]
+Example: [source:fatwa_0]فتوى من إسلام ويب[/source]
+
+أجب وفق الصيغة المحددة."""
 
         messages = [
-            Message(role="system", content=system_prompt),
+            Message(role="system", content=SCHOLARLY_SYSTEM_PROMPT),
             Message(role="user", content=user_prompt),
         ]
         
         try:
             response = rag_state.generator.generate(messages, GenerationConfig(
-                max_tokens=2000,
-                temperature=0.7,
+                max_tokens=3000,
+                temperature=0.5,
             ))
             answer = response.content
+            
+            # Post-processing: Remove thought block
+            import re
+            thought_match = re.search(r'<thought>.*?</thought>', answer, re.DOTALL | re.IGNORECASE)
+            if thought_match:
+                answer = answer[:thought_match.start()] + answer[thought_match.end():]
+                answer = answer.strip()
+            
+            # Post-processing: Verify and fix hallucinated citations
+            answer, hallucinations = verify_answer_citations(answer, sources_for_verification)
+            if hallucinations:
+                logger.warning(f"Fixed {len(hallucinations)} hallucinated citations")
+            
+            # Post-processing: Convert [source:ID]text[/source] to clickable HTML
+            def replace_source_tag(match):
+                source_id = match.group(1)
+                display_text = match.group(2)
+                return f'<a href="#" class="source-link" data-source-id="{source_id}" onclick="showSourceModal(\'{source_id}\'); return false;">{display_text}</a>'
+            
+            answer = re.sub(r'\[source:([^\]]+)\]([^\[]+)\[/source\]', replace_source_tag, answer)
+            
+            # Also handle old format [[source_id:ID|Text]]
+            def replace_old_source_link(match):
+                parts = match.group(1).split('|')
+                source_id = parts[0].replace('source_id:', '')
+                display_text = parts[1] if len(parts) > 1 else source_id
+                return f'<a href="#" class="source-link" data-source-id="{source_id}" onclick="showSourceModal(\'{source_id}\'); return false;">{display_text}</a>'
+            
+            answer = re.sub(r'\[\[([^\]]+)\]\]', replace_old_source_link, answer)
+            
         except Exception as e:
             logger.error(f"Generation failed: {e}")
-            answer = f"عذراً، حدث خطأ في توليد الإجابة. / Sorry, generation failed: {str(e)}"
+            answer = "عذراً، حدث خطأ في توليد الإجابة."
     elif not all_docs:
-        answer = "لم يتم العثور على مصادر ذات صلة. / No relevant sources found."
+        answer = "لم يتم العثور على مصادر ذات صلة."
     else:
-        answer = "خدمة التوليد غير متاحة حالياً. / Generation service unavailable."
+        answer = "خدمة التوليد غير متاحة حالياً."
     
     return QueryResponse(
         answer=answer,

@@ -1,0 +1,55 @@
+# Provider Configuration for RAG Service
+# This file provides default configurations that can be overridden by environment variables
+
+providers:
+  lmstudio:
+    base_url: "http://localhost:1234/v1"
+    model: "qcri_fanar-1-9b"
+    max_tokens: 4096
+    temperature: 0.5
+    timeout: 120.0
+    description: "Local LM Studio instance for privacy-focused development"
+    
+  gemini:
+    model: "gemini-1.5-flash"
+    max_tokens: 8192
+    temperature: 0.7
+    description: "Google Gemini - good Arabic support and cost-effective"
+    
+  openai:
+    base_url: "https://api.openai.com/v1"
+    model: "gpt-4"
+    max_tokens: 4096
+    temperature: 0.7
+    timeout: 120.0
+    description: "OpenAI-compatible API (works with various providers)"
+
+# Default provider to use
+default_provider: "lmstudio"
+
+# Embedding configuration
+embedding:
+  model_name: "Omartificial-Intelligence-Space/GATE-AraBert-v1"
+  device: "gpu"
+  batch_size: 32
+
+# Retrieval configuration
+retrieval:
+  top_k: 5
+  similarity_threshold: 0.5
+  rerank: true
+  rerank_model: null  # Path to local reranker if available
+  hybrid_search: false
+
+# Citation configuration
+citations:
+  format: "islamic_scholarly"
+  include_inline: true
+  include_references: true
+  include_confidence: true
+
+# Safety configuration
+safety:
+  enable_checks: true
+  max_query_length: 2000
+  blocked_patterns: []

@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>الفقيه الذكي | Islamic RAG</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="logo">
+                <span class="logo-icon">📚</span>
+                <h1>الفقيه الذكي</h1>
+            </div>
+            <p class="subtitle">Islamic Knowledge Assistant</p>
+        </header>
+
+        <!-- Main Chat Area -->
+        <main class="chat-container">
+            <div class="messages" id="messages">
+                <!-- Welcome Message -->
+                <div class="message assistant">
+                    <div class="message-content">
+                        <p>السلام عليكم ورحمة الله وبركاته 👋</p>
+                        <p>أنا مساعدك للبحث في الفقه الإسلامي. اسألني عن أي حكم شرعي وسأبحث لك في كتب الفقه والفتاوى والأحاديث.</p>
+                        <p class="hint">مثال: ما حكم صلاة الجماعة؟</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sources Panel (Hidden by default) -->
+            <div class="sources-panel" id="sourcesPanel">
+                <div class="sources-header">
+                    <h3>📖 المصادر</h3>
+                    <button class="close-btn" onclick="toggleSources()">×</button>
+                </div>
+                <div class="sources-list" id="sourcesList"></div>
+            </div>
+        </main>
+
+        <!-- Input Area -->
+        <footer class="input-area">
+            <div class="input-wrapper">
+                <textarea 
+                    id="queryInput" 
+                    placeholder="اكتب سؤالك هنا..."
+                    rows="1"
+                    autofocus
+                ></textarea>
+                <button id="sendBtn" onclick="sendQuery()" title="إرسال">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M22 2L11 13M22 2L15 22L11 13M22 2L2 9L11 13"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="input-hint">اضغط Enter للإرسال أو Shift+Enter لسطر جديد</div>
+        </footer>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-content">
+            <div class="spinner"></div>
+            <p>جاري البحث في المصادر...</p>
+        </div>
+    </div>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>

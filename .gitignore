@@ -1,0 +1,13 @@
+data/
+code/ocr/Arabic-Deep-Learning-OCR/
+
+__pycache__/
+.env
+
+qdrant
+
+task_dist.md
+WEEK1_REDHOUANE_PLAN.md
+testing/
+
+qdrant_export/

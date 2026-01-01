@@ -116,6 +116,30 @@ queryInput.addEventListener('input', () => {
     queryInput.style.height = Math.min(queryInput.scrollHeight, 150) + 'px';
 });
 
+// Quick edit last message with Up arrow
+queryInput.addEventListener('keydown', (e) => {
+    // Up arrow when input is empty - edit last user message
+    if (e.key === 'ArrowUp' && !queryInput.value && !state.editingMessageId && state.messages.length > 0) {
+        const lastUserMsg = [...state.messages].reverse().find(m => m.role === 'user');
+        if (lastUserMsg) {
+            e.preventDefault();
+            startEdit(lastUserMsg.id);
+        }
+    }
+});
+
+// Quick edit last message with Up arrow
+queryInput.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowUp' && !queryInput.value && !state.editingMessageId && state.messages.length > 0) {
+        // Find last user message
+        const lastUserMsg = [...state.messages].reverse().find(m => m.role === 'user');
+        if (lastUserMsg) {
+            e.preventDefault();
+            startEdit(lastUserMsg.id);
+        }
+    }
+});
+
 // ============================================================
 // Message ID Generation
 // ============================================================
@@ -264,7 +288,26 @@ async function sendQuery(editedContent = null) {
                                 assistantMessage.content = finalAnswer;
                                 contentDiv.innerHTML = renderMarkdown(styleConsensusLabels(finalAnswer));
                                 
+                                // Add copy button after content
+                                const copyBtn = document.createElement('button');
+                                copyBtn.className = 'copy-btn';
+                                copyBtn.onclick = () => copyResponse(assistantMsgId);
+                                copyBtn.title = 'نسخ الإجابة';
+                                copyBtn.innerHTML = `
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                                    </svg>
+                                `;
+                                
                                 // Add sources button if we have sources
+                                const actionsDiv = document.createElement('div');
+                                actionsDiv.className = 'message-actions';
+                                actionsDiv.appendChild(copyBtn);
+                                
+                                // Add translate button
+                                addTranslateButton(actionsDiv, assistantMsgId, finalAnswer);
+                                
                                 if (state.currentSources.length > 0) {
                                     const sourcesBtn = document.createElement('button');
                                     sourcesBtn.className = 'sources-btn';
@@ -272,6 +315,8 @@ async function sendQuery(editedContent = null) {
                                     sourcesBtn.innerHTML = `📖 عرض المصادر (${state.currentSources.length})`;
                                     contentDiv.parentElement.appendChild(sourcesBtn);
                                 }
+                                
+                                contentDiv.parentElement.appendChild(actionsDiv);
                                 
                                 // Update chat history for context
                                 state.chatHistory.push({ role: 'assistant', content: finalAnswer });
@@ -342,9 +387,30 @@ function addMessageToDOM(content, role, messageId, sources = null, animate = tru
         // Add streaming indicator if streaming
         const streamingIndicator = isStreaming ? '<span class="streaming-indicator">●</span>' : '';
         
+        // Add copy button for completed responses
+        const copyButton = !isStreaming && content ? `
+            <button class="copy-btn" onclick="copyResponse('${messageId}')" title="نسخ الإجابة">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+            </button>
+        ` : '';
+        
+        // Add translate button for completed responses
+        const translateButton = !isStreaming && content ? `
+            <button class="translate-btn" data-message-id="${messageId}" onclick="translateMessage('${messageId}')" title="ترجمة">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12.87 15.07l-2.54-2.51.03-.03A17.52 17.52 0 0014.07 6H17V4h-7V2H8v2H1v2h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11.76-2.04zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12zm-2.62 7l1.62-4.33L19.12 17h-3.24z"/>
+                </svg>
+                <span>ترجمة</span>
+            </button>
+        ` : '';
+        
         messageDiv.innerHTML = `
             <div class="message-content">
                 <div class="message-text">${formattedContent}${streamingIndicator}</div>
+                ${copyButton || translateButton ? `<div class="message-actions">${copyButton}${translateButton}</div>` : ''}
             </div>
         `;
     } else {
@@ -373,6 +439,60 @@ function addMessageToDOM(content, role, messageId, sources = null, animate = tru
     }
     
     return messageDiv;
+}
+
+// ============================================================
+// Copy Response Function
+// ============================================================
+
+function copyResponse(messageId) {
+    const message = state.messages.find(m => m.id === messageId);
+    if (!message || message.role !== 'assistant') return;
+    
+    // Extract clean text from HTML content
+    const cleanText = extractCleanText(message.content);
+    
+    navigator.clipboard.writeText(cleanText).then(() => {
+        // Show feedback
+        const btn = document.querySelector(`[data-message-id="${messageId}"] .copy-btn`);
+        if (btn) {
+            const originalHTML = btn.innerHTML;
+            btn.innerHTML = `
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="20 6 9 17 4 12"></polyline>
+                </svg>
+            `;
+            btn.classList.add('copied');
+            
+            setTimeout(() => {
+                btn.innerHTML = originalHTML;
+                btn.classList.remove('copied');
+            }, 2000);
+        }
+    }).catch(err => {
+        console.error('Failed to copy:', err);
+        alert('فشل النسخ / Copy failed');
+    });
+}
+
+function extractCleanText(html) {
+    // Create a temporary div to parse HTML
+    const temp = document.createElement('div');
+    temp.innerHTML = html;
+    
+    // Remove source links but keep their text
+    const links = temp.querySelectorAll('a.source-link');
+    links.forEach(link => {
+        link.replaceWith(link.textContent);
+    });
+    
+    // Get text content
+    let text = temp.textContent || temp.innerText || '';
+    
+    // Clean up multiple newlines
+    text = text.replace(/\n{3,}/g, '\n\n');
+    
+    return text.trim();
 }
 
 // ============================================================
@@ -679,6 +799,9 @@ function showSourceModal(sourceId) {
         return;
     }
 
+    // Store for translation
+    currentSourceForTranslation = source;
+
     // Get modal elements
     const overlay = document.getElementById('sourceModalOverlay');
     const icon = document.getElementById('sourceIcon');
@@ -686,6 +809,19 @@ function showSourceModal(sourceId) {
     const badge = document.getElementById('sourceTypeBadge');
     const metadata = document.getElementById('sourceMetadata');
     const content = document.getElementById('sourceContent');
+    const translateBtn = document.getElementById('translateSourceBtn');
+
+    // Reset translate button state
+    if (translateBtn) {
+        translateBtn.disabled = false;
+        translateBtn.classList.remove('translating', 'translated');
+        translateBtn.innerHTML = `
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12.87 15.07l-2.54-2.51.03-.03A17.52 17.52 0 0014.07 6H17V4h-7V2H8v2H1v2h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11.76-2.04zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12zm-2.62 7l1.62-4.33L19.12 17h-3.24z"/>
+            </svg>
+            <span>Translate</span>
+        `;
+    }
 
     // Set icon and badge based on source type
     const typeConfig = {
@@ -800,3 +936,337 @@ addHeaderActions();
 
 // Focus input on load
 queryInput.focus();
+
+// ============================================================
+// Translation Module - Client-side Caching & API
+// ============================================================
+
+const translationCache = {
+    // Cache storage: { hash: { translated: string, timestamp: number } }
+    _cache: {},
+    _storageKey: 'islamic_rag_translations',
+    _maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    
+    /**
+     * Generate a simple hash for text
+     */
+    _hash(text) {
+        let hash = 0;
+        for (let i = 0; i < text.length; i++) {
+            const char = text.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash; // Convert to 32bit integer
+        }
+        return hash.toString(36);
+    },
+    
+    /**
+     * Load cache from localStorage
+     */
+    load() {
+        try {
+            const saved = localStorage.getItem(this._storageKey);
+            if (saved) {
+                this._cache = JSON.parse(saved);
+                // Clean old entries
+                this._cleanup();
+            }
+        } catch (e) {
+            console.error('Failed to load translation cache:', e);
+            this._cache = {};
+        }
+    },
+    
+    /**
+     * Save cache to localStorage
+     */
+    save() {
+        try {
+            localStorage.setItem(this._storageKey, JSON.stringify(this._cache));
+        } catch (e) {
+            console.error('Failed to save translation cache:', e);
+        }
+    },
+    
+    /**
+     * Clean expired entries
+     */
+    _cleanup() {
+        const now = Date.now();
+        let changed = false;
+        
+        for (const key in this._cache) {
+            if (now - this._cache[key].timestamp > this._maxAge) {
+                delete this._cache[key];
+                changed = true;
+            }
+        }
+        
+        if (changed) {
+            this.save();
+        }
+    },
+    
+    /**
+     * Get cached translation
+     */
+    get(text) {
+        const hash = this._hash(text);
+        const entry = this._cache[hash];
+        
+        if (entry && (Date.now() - entry.timestamp < this._maxAge)) {
+            return entry.translated;
+        }
+        return null;
+    },
+    
+    /**
+     * Set cached translation
+     */
+    set(text, translated) {
+        const hash = this._hash(text);
+        this._cache[hash] = {
+            translated,
+            timestamp: Date.now(),
+        };
+        this.save();
+    },
+    
+    /**
+     * Clear all cache
+     */
+    clear() {
+        this._cache = {};
+        localStorage.removeItem(this._storageKey);
+    }
+};
+
+// Load translation cache on startup
+translationCache.load();
+
+/**
+ * Translate text to English using API
+ * @param {string} text - Arabic text to translate
+ * @param {Array} sources - Optional source metadata
+ * @returns {Promise<{translated: string, cached: boolean}>}
+ */
+async function translateText(text, sources = null) {
+    // Check cache first
+    const cached = translationCache.get(text);
+    if (cached) {
+        console.log('Translation found in cache');
+        return { translated: cached, cached: true };
+    }
+    
+    // Call API
+    try {
+        const response = await fetch('/api/translate', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ text, sources }),
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Translation failed');
+        }
+        
+        const data = await response.json();
+        
+        // Cache the result
+        translationCache.set(text, data.translated_text);
+        
+        return { translated: data.translated_text, cached: false };
+        
+    } catch (error) {
+        console.error('Translation error:', error);
+        throw error;
+    }
+}
+
+/**
+ * Add translate button to assistant message actions
+ */
+function addTranslateButton(actionsDiv, messageId, content) {
+    const translateBtn = document.createElement('button');
+    translateBtn.className = 'translate-btn';
+    translateBtn.setAttribute('data-message-id', messageId);
+    translateBtn.onclick = () => translateMessage(messageId, content);
+    translateBtn.innerHTML = `
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12.87 15.07l-2.54-2.51.03-.03A17.52 17.52 0 0014.07 6H17V4h-7V2H8v2H1v2h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11.76-2.04zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12zm-2.62 7l1.62-4.33L19.12 17h-3.24z"/>
+        </svg>
+        <span>ترجمة</span>
+    `;
+    actionsDiv.appendChild(translateBtn);
+}
+
+/**
+ * Translate an assistant message
+ */
+async function translateMessage(messageId, originalContent) {
+    const messageDiv = document.querySelector(`[data-message-id="${messageId}"]`);
+    const translateBtn = messageDiv?.querySelector('.translate-btn');
+    const contentDiv = messageDiv?.querySelector('.message-content');
+    
+    if (!messageDiv || !contentDiv) return;
+    
+    // Check if already translated
+    const existingTranslation = contentDiv.querySelector('.translation-container');
+    if (existingTranslation) {
+        // Toggle visibility
+        existingTranslation.classList.toggle('hidden');
+        translateBtn?.classList.toggle('translated');
+        return;
+    }
+    
+    // Show loading state
+    translateBtn?.classList.add('translating');
+    translateBtn.innerHTML = `
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12.87 15.07l-2.54-2.51.03-.03A17.52 17.52 0 0014.07 6H17V4h-7V2H8v2H1v2h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11.76-2.04zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12zm-2.62 7l1.62-4.33L19.12 17h-3.24z"/>
+        </svg>
+        <span>جاري...</span>
+    `;
+    
+    try {
+        // Get message from state or extract from DOM
+        const message = state.messages.find(m => m.id === messageId);
+        const textToTranslate = message?.content || extractCleanText(originalContent);
+        
+        const result = await translateText(textToTranslate, message?.sources);
+        
+        // Create translation container
+        const translationContainer = document.createElement('div');
+        translationContainer.className = 'translation-container';
+        translationContainer.innerHTML = `
+            <div class="translation-header">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12.87 15.07l-2.54-2.51.03-.03A17.52 17.52 0 0014.07 6H17V4h-7V2H8v2H1v2h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11.76-2.04zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12zm-2.62 7l1.62-4.33L19.12 17h-3.24z"/>
+                </svg>
+                <span>English Translation ${result.cached ? '(cached)' : ''}</span>
+            </div>
+            <div class="translation-content">${renderMarkdown(result.translated)}</div>
+        `;
+        
+        // Insert after message text
+        const messageText = contentDiv.querySelector('.message-text');
+        if (messageText) {
+            messageText.after(translationContainer);
+        } else {
+            contentDiv.appendChild(translationContainer);
+        }
+        
+        // Update button state
+        translateBtn?.classList.remove('translating');
+        translateBtn?.classList.add('translated');
+        translateBtn.innerHTML = `
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="20 6 9 17 4 12"/>
+            </svg>
+            <span>مترجم</span>
+        `;
+        
+    } catch (error) {
+        console.error('Translation failed:', error);
+        
+        // Show error
+        const errorDiv = document.createElement('div');
+        errorDiv.className = 'translation-error';
+        errorDiv.textContent = `Translation failed: ${error.message}`;
+        contentDiv.appendChild(errorDiv);
+        
+        // Reset button
+        translateBtn?.classList.remove('translating');
+        translateBtn.innerHTML = `
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12.87 15.07l-2.54-2.51.03-.03A17.52 17.52 0 0014.07 6H17V4h-7V2H8v2H1v2h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11.76-2.04zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12zm-2.62 7l1.62-4.33L19.12 17h-3.24z"/>
+            </svg>
+            <span>ترجمة</span>
+        `;
+        
+        // Remove error after 5 seconds
+        setTimeout(() => errorDiv.remove(), 5000);
+    }
+}
+
+// State for current source modal
+let currentSourceForTranslation = null;
+
+/**
+ * Translate source content in modal
+ */
+async function translateSourceContent() {
+    const btn = document.getElementById('translateSourceBtn');
+    const contentDiv = document.getElementById('sourceContent');
+    
+    if (!currentSourceForTranslation || !contentDiv) return;
+    
+    // Check if already translated
+    const existingTranslation = contentDiv.querySelector('.source-translation');
+    if (existingTranslation) {
+        existingTranslation.classList.toggle('hidden');
+        btn.classList.toggle('translated');
+        btn.innerHTML = existingTranslation.classList.contains('hidden') 
+            ? `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.87 15.07l-2.54-2.51.03-.03A17.52 17.52 0 0014.07 6H17V4h-7V2H8v2H1v2h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11.76-2.04zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12zm-2.62 7l1.62-4.33L19.12 17h-3.24z"/></svg><span>Translate</span>`
+            : `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg><span>Translated</span>`;
+        return;
+    }
+    
+    // Show loading
+    btn.disabled = true;
+    btn.classList.add('translating');
+    btn.innerHTML = `
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12.87 15.07l-2.54-2.51.03-.03A17.52 17.52 0 0014.07 6H17V4h-7V2H8v2H1v2h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11.76-2.04zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12zm-2.62 7l1.62-4.33L19.12 17h-3.24z"/>
+        </svg>
+        <span>Translating...</span>
+    `;
+    
+    try {
+        const textToTranslate = currentSourceForTranslation.full_content || currentSourceForTranslation.content_preview;
+        const result = await translateText(textToTranslate);
+        
+        // Create translation section
+        const translationDiv = document.createElement('div');
+        translationDiv.className = 'source-translation';
+        translationDiv.innerHTML = `
+            <div class="source-translation-header">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12.87 15.07l-2.54-2.51.03-.03A17.52 17.52 0 0014.07 6H17V4h-7V2H8v2H1v2h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11.76-2.04zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12zm-2.62 7l1.62-4.33L19.12 17h-3.24z"/>
+                </svg>
+                English Translation ${result.cached ? '(cached)' : ''}
+            </div>
+            <div class="source-translation-content">${escapeHtml(result.translated).replace(/\n/g, '<br>')}</div>
+        `;
+        
+        contentDiv.appendChild(translationDiv);
+        
+        // Update button
+        btn.disabled = false;
+        btn.classList.remove('translating');
+        btn.classList.add('translated');
+        btn.innerHTML = `
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="20 6 9 17 4 12"/>
+            </svg>
+            <span>Translated</span>
+        `;
+        
+    } catch (error) {
+        console.error('Source translation failed:', error);
+        
+        btn.disabled = false;
+        btn.classList.remove('translating');
+        btn.innerHTML = `
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12.87 15.07l-2.54-2.51.03-.03A17.52 17.52 0 0014.07 6H17V4h-7V2H8v2H1v2h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11.76-2.04zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12zm-2.62 7l1.62-4.33L19.12 17h-3.24z"/>
+            </svg>
+            <span>Translate</span>
+        `;
+        
+        alert('Translation failed: ' + error.message);
+    }
+}

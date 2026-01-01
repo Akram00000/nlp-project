@@ -52,6 +52,20 @@ class ChatMessage(BaseModel):
     content: str
 
 
+class TranslateRequest(BaseModel):
+    """Request model for translation."""
+    text: str
+    sources: Optional[List[dict]] = None  # Source metadata for smart translation
+
+
+class TranslateResponse(BaseModel):
+    """Response model for translation."""
+    original_text: str
+    translated_text: str
+    provider: Optional[str] = None
+    cached: bool = False
+
+
 class SourceInfo(BaseModel):
     """Information about a source document."""
     chunk_id: str  # Unique identifier for source linking
@@ -545,6 +559,84 @@ Example: [source:fatwa_0]فتوى من إسلام ويب[/source]
 # ============================================================
 # Run Server
 # ============================================================
+
+# Translation provider (lazy-loaded)
+_translation_provider = None
+
+
+def get_translation_provider():
+    """Get or create translation provider, reusing RAG's LLM provider if available."""
+    global _translation_provider
+    if _translation_provider is None:
+        try:
+            from rag_service.translation import TranslationProviderFactory
+            
+            # First, try to reuse the existing RAG LLM provider (already initialized and working)
+            if rag_state.llm_provider:
+                logger.info("Creating translation provider from existing RAG LLM provider")
+                _translation_provider = TranslationProviderFactory.from_llm_provider(
+                    rag_state.llm_provider
+                )
+            else:
+                # Fallback: create a new provider
+                _translation_provider = TranslationProviderFactory.create_with_fallback()
+            
+            if _translation_provider:
+                logger.info(f"Translation provider initialized: {_translation_provider.llm_provider.name}")
+        except Exception as e:
+            logger.warning(f"Could not initialize translation provider: {e}")
+    return _translation_provider
+
+
+@app.post("/api/translate", response_model=TranslateResponse)
+async def translate_text(request: TranslateRequest):
+    """
+    Translate Arabic text to English.
+    
+    Uses smart translation that:
+    - Preserves existing English hadith translations when available
+    - Keeps Quranic text in Arabic with translation
+    - Uses LLM for remaining content
+    """
+    text = request.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Text cannot be empty")
+    
+    logger.info(f"[TRANSLATE] Translating text ({len(text)} chars)")
+    
+    try:
+        from rag_service.translation import SmartResponseTranslator, Language
+        
+        # Get or create translator
+        provider = get_translation_provider()
+        
+        if not provider:
+            raise HTTPException(
+                status_code=503, 
+                detail="Translation service unavailable - no LLM provider configured"
+            )
+        
+        translator = SmartResponseTranslator(provider)
+        
+        # Perform translation
+        result = translator.translate_response(
+            text=text,
+            sources=request.sources,
+        )
+        
+        return TranslateResponse(
+            original_text=text,
+            translated_text=result.translated_text,
+            provider=result.metadata.get("provider"),
+            cached=False,
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[TRANSLATE] Error: {e}")
+        raise HTTPException(status_code=500, detail=f"Translation failed: {str(e)}")
+
 
 if __name__ == "__main__":
     logger.info("Starting Islamic RAG Web Server...")

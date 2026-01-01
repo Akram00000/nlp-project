@@ -188,18 +188,56 @@ class GeminiProvider(BaseLLMProvider):
                     system_instruction = msg.content
                     break
             
-            if system_instruction:
-                model = self._client.GenerativeModel(
-                    self.config.model,
-                    system_instruction=system_instruction
+            # Check which SDK is being used
+            if hasattr(self._client, 'models'):
+                # New google-genai SDK (v1.x) - use sync method in async context
+                # The new SDK doesn't have native async support yet
+                from google.genai import types
+                
+                config_dict = {}
+                if max_tokens:
+                    config_dict['max_output_tokens'] = max_tokens
+                if temperature is not None:
+                    config_dict['temperature'] = temperature
+                if system_instruction:
+                    config_dict['system_instruction'] = system_instruction
+                
+                generate_config = types.GenerateContentConfig(**config_dict) if config_dict else None
+                
+                content_parts = []
+                for msg in gemini_messages:
+                    if isinstance(msg, dict) and 'parts' in msg:
+                        content_parts.extend(msg['parts'])
+                    elif isinstance(msg, str):
+                        content_parts.append(msg)
+                
+                if len(content_parts) == 1:
+                    contents = content_parts[0]
+                else:
+                    contents = "\n\n".join(content_parts)
+                
+                # Run sync method - new SDK handles this
+                import asyncio
+                response = await asyncio.to_thread(
+                    self._client.models.generate_content,
+                    model=self._model_name,
+                    contents=contents,
+                    config=generate_config
                 )
             else:
-                model = self._model
-            
-            response = await model.generate_content_async(
-                gemini_messages,
-                generation_config=generation_config
-            )
+                # Old google-generativeai SDK
+                if system_instruction:
+                    model = self._client.GenerativeModel(
+                        self.config.model,
+                        system_instruction=system_instruction
+                    )
+                else:
+                    model = self._model
+                
+                response = await model.generate_content_async(
+                    gemini_messages,
+                    generation_config=generation_config
+                )
             
             return self._parse_response(response)
             
@@ -229,23 +267,75 @@ class GeminiProvider(BaseLLMProvider):
                     system_instruction = msg.content
                     break
             
-            if system_instruction:
-                model = self._client.GenerativeModel(
-                    self.config.model,
-                    system_instruction=system_instruction
-                )
+            # Check which SDK is being used
+            if hasattr(self._client, 'models'):
+                # New google-genai SDK (v1.x)
+                from google.genai import types
+                import asyncio
+                
+                config_dict = {}
+                if max_tokens:
+                    config_dict['max_output_tokens'] = max_tokens
+                if temperature is not None:
+                    config_dict['temperature'] = temperature
+                if system_instruction:
+                    config_dict['system_instruction'] = system_instruction
+                
+                generate_config = types.GenerateContentConfig(**config_dict) if config_dict else None
+                
+                content_parts = []
+                for msg in gemini_messages:
+                    if isinstance(msg, dict) and 'parts' in msg:
+                        content_parts.extend(msg['parts'])
+                    elif isinstance(msg, str):
+                        content_parts.append(msg)
+                
+                if len(content_parts) == 1:
+                    contents = content_parts[0]
+                else:
+                    contents = "\n\n".join(content_parts)
+                
+                # Use generate_content_stream for streaming
+                def sync_stream():
+                    return self._client.models.generate_content_stream(
+                        model=self._model_name,
+                        contents=contents,
+                        config=generate_config
+                    )
+                
+                # Get the stream iterator in a thread
+                stream_response = await asyncio.to_thread(sync_stream)
+                
+                # Iterate through the stream
+                for chunk in stream_response:
+                    if hasattr(chunk, 'text') and chunk.text:
+                        yield chunk.text
+                    elif hasattr(chunk, 'candidates') and chunk.candidates:
+                        for candidate in chunk.candidates:
+                            if hasattr(candidate, 'content') and candidate.content:
+                                for part in candidate.content.parts:
+                                    if hasattr(part, 'text') and part.text:
+                                        yield part.text
+                    await asyncio.sleep(0)  # Allow other coroutines to run
             else:
-                model = self._model
-            
-            response = await model.generate_content_async(
-                gemini_messages,
-                generation_config=generation_config,
-                stream=True
-            )
-            
-            async for chunk in response:
-                if chunk.text:
-                    yield chunk.text
+                # Old google-generativeai SDK
+                if system_instruction:
+                    model = self._client.GenerativeModel(
+                        self.config.model,
+                        system_instruction=system_instruction
+                    )
+                else:
+                    model = self._model
+                
+                response = await model.generate_content_async(
+                    gemini_messages,
+                    generation_config=generation_config,
+                    stream=True
+                )
+                
+                async for chunk in response:
+                    if chunk.text:
+                        yield chunk.text
                     
         except Exception as e:
             logger.error(f"Gemini stream failed: {e}")
